@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     twitter_bearer_token: str
     twitter_csrf_token: str
     twitter_cookies: str
-    twitter_graphql_query_id: str = "43OUXyQe2KB6BLfli5CFPA"
+    twitter_graphql_query_id: str
     
     # Database
     database_url: str

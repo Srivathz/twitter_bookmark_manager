@@ -48,17 +48,20 @@ twitter-bookmarks/
 | `is_deleted` | INTEGER DEFAULT 0 | Soft delete flag |
 | `inserted_at` | TEXT NOT NULL | Local insertion timestamp |
 | `updated_at` | TEXT NOT NULL | Last local update timestamp |
+| `sync_state_id` | INTEGER FOREIGN KEY | References id from sync_state |
 
 ### Table: `sync_state`
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `id` | INTEGER PRIMARY KEY CHECK(id=1) | Singleton row |
+| `id` | INTEGER PRIMARY KEY | Incremental PRIMARY KEY |
 | `last_sync_started_at` | TEXT | When last sync started |
 | `last_sync_completed_at` | TEXT | When last sync completed |
 | `last_seen_marker` | TEXT | For delta fetches |
 | `last_error` | TEXT | Last error message |
 | `page_cursor` | TEXT | Pagination cursor |
+| `bookmarks_added` | INTEGER | No of bookmakrs added in the sync |
+| `bookmarks_updated` | INTEGER | No of bookmakrs updated in the sync |
 
 ## Setup Instructions
 
@@ -71,7 +74,7 @@ twitter-bookmarks/
 
 ```bash
 # Clone or download the project
-cd twitter-bookmarks
+cd twitter_bookmark_manager
 
 # Create virtual environment
 python -m venv venv
