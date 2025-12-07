@@ -106,15 +106,11 @@ async def get_stats(db: Session = Depends(get_db)):
 
 @app.post("/sync")
 async def sync_bookmarks(
-    max_pages: Optional[int] = None,
     settings: Settings = Depends(get_settings),
     db: Session = Depends(get_db)
 ):
     """
     Sync bookmarks from Twitter API to local database.
-    
-    Args:
-        max_pages: Maximum number of pages to fetch (optional, fetches all if not specified)
     
     Returns:
         Sync result with statistics
@@ -122,7 +118,8 @@ async def sync_bookmarks(
     sync_start = datetime.now().isoformat()
     
     try:
-        previous_sync_state = db.query(SyncState).order_by(desc(SyncState.last_sync_started_at)).first()
+        latest_synced_bookmark = db.query(Tweet.tweet_id).order_by(desc(Tweet.sync_state_id), (Tweet.inserted_at)).first()
+
         # Update sync state - started
         sync_state = SyncState()
         db.add(sync_state)
@@ -139,13 +136,9 @@ async def sync_bookmarks(
         new_bookmarks = 0
         updated_bookmarks = 0
         pages_fetched = 0
-        cursor = previous_sync_state.page_cursor if previous_sync_state else None  # Resume from last cursor if available
+        cursor = None
         
-        while True:
-            # Check max_pages limit
-            if max_pages and pages_fetched >= max_pages:
-                break
-            
+        while True:            
             # Fetch bookmarks page
             response = await client.fetch_bookmarks(cursor=cursor)
             tweets, next_cursor = client.parse_bookmarks_response(response)
@@ -161,6 +154,10 @@ async def sync_bookmarks(
                 if not tweet_data.get("tweet_id"):
                     continue
                 
+                if latest_synced_bookmark and tweet_data["tweet_id"] == latest_synced_bookmark[0]:
+                    next_cursor = None
+                    break  # Stop if we reached already synced bookmark
+
                 # Check if tweet already exists
                 existing_tweet = db.query(Tweet).filter_by(
                     tweet_id=tweet_data["tweet_id"]

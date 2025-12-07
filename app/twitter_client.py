@@ -85,7 +85,7 @@ class TwitterClient:
         # Build variables
         variables = {
             "count": "100",
-            "includePromotedContent": True
+            "includePromotedContent": False
         }
         if cursor:
             variables["cursor"] = cursor
