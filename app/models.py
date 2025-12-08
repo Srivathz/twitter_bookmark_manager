@@ -1,7 +1,7 @@
 """
 Database models for Twitter bookmarks management system.
 """
-from sqlalchemy import Column, Integer, Text, CheckConstraint, create_engine
+from sqlalchemy import Column, Integer, Text, CheckConstraint, ForeignKey, create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from datetime import datetime
@@ -53,6 +53,33 @@ class SyncState(Base):
     __table_args__ = (
         CheckConstraint('id = 1', name='singleton_check'),
     )
+
+
+class Category(Base):
+    """
+    Table: categories
+    Stores bookmark categories for organization.
+    """
+    __tablename__ = 'categories'
+    
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    name = Column(Text(120), unique=True, nullable=False)
+    description = Column(Text)
+    created_at = Column(Text, nullable=False)  # ISO 8601 timestamp
+    updated_at = Column(Text, nullable=False)  # ISO 8601 timestamp
+    is_deleted = Column(Integer, nullable=False, default=0)
+
+
+class TweetCategory(Base):
+    """
+    Table: tweet_categories
+    Many-to-many relationship between tweets and categories.
+    """
+    __tablename__ = 'tweet_categories'
+    
+    tweet_id = Column(Integer, ForeignKey('tweets.id'), primary_key=True, nullable=False)
+    category_id = Column(Integer, ForeignKey('categories.id'), primary_key=True, nullable=False)
+    added_at = Column(Text, nullable=False)  # ISO 8601 timestamp
 
 
 # Database setup functions
