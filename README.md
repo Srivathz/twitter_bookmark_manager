@@ -63,6 +63,26 @@ twitter-bookmarks/
 | `bookmarks_added` | INTEGER | No of bookmakrs added in the sync |
 | `bookmarks_updated` | INTEGER | No of bookmakrs updated in the sync |
 
+### Table: `categories`
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | INTEGER PRIMARY KEY | Category key (auto increment) |
+| `name` | TEXT UNIQUE NOT NULL | Display name (max 120 chars) |
+| `description` | TEXT | Optional notes |
+| `created_at` | TEXT NOT NULL | Creation timestamp (ISO 8601) |
+| `updated_at` | TEXT NOT NULL | Last update timestamp (ISO 8601) |
+| `is_deleted` | INTEGER DEFAULT 0 | Soft delete flag |
+
+### Table: `tweet_categories`
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `tweet_id` | INTEGER NOT NULL | FK to tweets.id |
+| `category_id` | INTEGER NOT NULL | FK to categories.id |
+| `added_at` | TEXT NOT NULL | Assignment timestamp (ISO 8601) |
+| **PRIMARY KEY** | | `(tweet_id, category_id)` |
+
 ## Setup Instructions
 
 ### 1. Prerequisites
@@ -167,6 +187,258 @@ Response:
   "last_error": null
 }
 ```
+
+### `GET /bookmarks`
+List all bookmarks sorted by `created_at` descending.
+
+**Parameters:**
+- `skip` (optional): Number of records to skip (default: 0)
+- `limit` (optional): Maximum number of records to return (default: 100, max: 1000)
+
+**Basic usage (first 100 bookmarks):**
+```bash
+curl http://localhost:8000/bookmarks
+```
+
+**With pagination:**
+```bash
+# Get first 50 bookmarks
+curl "http://localhost:8000/bookmarks?limit=50"
+
+# Get next 50 bookmarks (skip first 50)
+curl "http://localhost:8000/bookmarks?skip=50&limit=50"
+```
+
+Response:
+```json
+{
+  "total": 150,
+  "skip": 0,
+  "limit": 100,
+  "count": 100,
+  "bookmarks": [
+    {
+      "id": 1,
+      "tweet_id": "1234567890123456789",
+      "text": "This is a sample tweet...",
+      "author_id": "987654321",
+      "author_username": "example_user",
+      "created_at": "2025-12-06T10:30:00",
+      "bookmarked_at": "2025-12-06T11:00:00",
+      "is_read": false,
+      "has_media_image": true,
+      "has_media_video": false,
+      "url": "https://x.com/example_user/status/1234567890123456789",
+      "inserted_at": "2025-12-06T11:00:00.123456",
+      "updated_at": "2025-12-06T11:00:00.123456"
+    }
+  ]
+}
+```
+
+### `PATCH /bookmarks/{bookmark_id}`
+Update a bookmark: toggle read/unread status and manage category assignments.
+
+**Parameters:**
+- `bookmark_id` (path parameter): ID of the bookmark to update
+
+**Request body (all fields optional):**
+```json
+{
+  "is_read": true,
+  "add_categories": [1, 2],
+  "remove_categories": [3]
+}
+```
+
+**Fields:**
+- `is_read` (optional): Set to `true` to mark as read, `false` to mark as unread
+- `add_categories` (optional): Array of category IDs to assign to this bookmark
+- `remove_categories` (optional): Array of category IDs to unassign from this bookmark
+
+**Examples:**
+
+**Mark as read:**
+```bash
+curl -X PATCH http://localhost:8000/bookmarks/1 \
+  -H "Content-Type: application/json" \
+  -d '{"is_read": true}'
+```
+
+**Add categories:**
+```bash
+curl -X PATCH http://localhost:8000/bookmarks/1 \
+  -H "Content-Type: application/json" \
+  -d '{"add_categories": [1, 2]}'
+```
+
+**Remove categories:**
+```bash
+curl -X PATCH http://localhost:8000/bookmarks/1 \
+  -H "Content-Type: application/json" \
+  -d '{"remove_categories": [3]}'
+```
+
+**Combined update:**
+```bash
+curl -X PATCH http://localhost:8000/bookmarks/1 \
+  -H "Content-Type: application/json" \
+  -d '{
+    "is_read": true,
+    "add_categories": [1, 2],
+    "remove_categories": [3]
+  }'
+```
+
+Response (200 OK):
+```json
+{
+  "status": "success",
+  "message": "Bookmark updated: is_read=true, added category 'Tech Articles', removed category 'News'",
+  "bookmark": {
+    "id": 1,
+    "tweet_id": "1234567890123456789",
+    "text": "This is a sample tweet...",
+    "author_username": "example_user",
+    "is_read": true,
+    "url": "https://x.com/example_user/status/1234567890123456789",
+    "updated_at": "2025-12-08T11:30:00.123456",
+    "categories": [
+      {
+        "id": 1,
+        "name": "Tech Articles",
+        "description": "Technical articles and tutorials"
+      },
+      {
+        "id": 2,
+        "name": "Favorites",
+        "description": null
+      }
+    ]
+  },
+  "changes": {
+    "read_status_changed": true,
+    "categories_added": ["Tech Articles"],
+    "categories_removed": ["News"]
+  }
+}
+```
+
+**Error responses:**
+- `404 Not Found`: Bookmark or category with specified ID does not exist
+- `400 Bad Request`: Invalid request data
+
+### `POST /categories`
+Create a new category for organizing bookmarks.
+
+**Request body:**
+```json
+{
+  "name": "Tech Articles",
+  "description": "Technical articles and tutorials"
+}
+```
+
+**Parameters:**
+- `name` (required): Category name (1-120 characters, must be unique)
+- `description` (optional): Optional description for the category
+
+**Example:**
+```bash
+curl -X POST http://localhost:8000/categories \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Tech Articles",
+    "description": "Technical articles and tutorials"
+  }'
+```
+
+Response (201 Created):
+```json
+{
+  "id": 1,
+  "name": "Tech Articles",
+  "description": "Technical articles and tutorials",
+  "created_at": "2025-12-08T10:30:00.123456",
+  "updated_at": "2025-12-08T10:30:00.123456",
+  "is_deleted": false
+}
+```
+
+**Error responses:**
+- `400 Bad Request`: Empty name or name exceeds 120 characters
+- `409 Conflict`: Category with the same name already exists
+
+### `GET /categories`
+List all categories.
+
+**Parameters:**
+- `include_deleted` (optional): Include deleted categories (default: false)
+
+**Basic usage (active categories only):**
+```bash
+curl http://localhost:8000/categories
+```
+
+**Include deleted categories:**
+```bash
+curl "http://localhost:8000/categories?include_deleted=true"
+```
+
+Response:
+```json
+{
+  "total": 3,
+  "categories": [
+    {
+      "id": 1,
+      "name": "Tech Articles",
+      "description": "Technical articles and tutorials",
+      "created_at": "2025-12-08T10:30:00.123456",
+      "updated_at": "2025-12-08T10:30:00.123456",
+      "is_deleted": false
+    },
+    {
+      "id": 2,
+      "name": "News",
+      "description": "Current events and news",
+      "created_at": "2025-12-08T10:31:00.123456",
+      "updated_at": "2025-12-08T10:31:00.123456",
+      "is_deleted": false
+    }
+  ]
+}
+```
+
+### `DELETE /categories/{category_id}`
+Mark a category as deleted (soft delete).
+
+**Parameters:**
+- `category_id` (path parameter): ID of the category to delete
+
+**Example:**
+```bash
+curl -X DELETE http://localhost:8000/categories/1
+```
+
+Response (200 OK):
+```json
+{
+  "status": "success",
+  "message": "Category 'Tech Articles' marked as deleted",
+  "category": {
+    "id": 1,
+    "name": "Tech Articles",
+    "description": "Technical articles and tutorials",
+    "is_deleted": true,
+    "deleted_at": "2025-12-08T11:00:00.123456"
+  }
+}
+```
+
+**Error responses:**
+- `404 Not Found`: Category with specified ID does not exist
+- `410 Gone`: Category is already deleted
 
 ### `POST /sync`
 Sync bookmarks from Twitter API.

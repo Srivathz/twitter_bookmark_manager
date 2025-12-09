@@ -5,12 +5,14 @@ from fastapi import FastAPI, HTTPException, Depends
 from fastapi.responses import JSONResponse
 from sqlalchemy.orm import Session
 from sqlalchemy import desc
+from sqlalchemy.exc import IntegrityError
 from datetime import datetime
-from typing import Optional
+from typing import Optional, List
+from pydantic import BaseModel, Field
 import traceback
 
 from app.config import Settings, get_settings
-from app.models import get_engine, init_db, get_session, Tweet, SyncState
+from app.models import get_engine, init_db, get_session, Tweet, SyncState, Category, TweetCategory
 from app.twitter_client import TwitterClient
 
 app = FastAPI(
@@ -18,6 +20,34 @@ app = FastAPI(
     description="FastAPI service to sync Twitter bookmarks to local SQLite database",
     version="1.0.0"
 )
+
+
+# Pydantic models for request/response
+class CategoryCreate(BaseModel):
+    """Request model for creating a category."""
+    name: str = Field(..., min_length=1, max_length=120, description="Category name")
+    description: Optional[str] = Field(None, description="Optional category description")
+
+
+class CategoryResponse(BaseModel):
+    """Response model for category data."""
+    id: int
+    name: str
+    description: Optional[str]
+    created_at: str
+    updated_at: str
+    is_deleted: bool
+
+    class Config:
+        from_attributes = True
+
+
+class BookmarkUpdate(BaseModel):
+    """Request model for updating a bookmark."""
+    is_read: Optional[bool] = Field(None, description="Toggle read/unread status")
+    add_categories: Optional[List[int]] = Field(None, description="List of category IDs to add")
+    remove_categories: Optional[List[int]] = Field(None, description="List of category IDs to remove")
+
 
 # Initialize database on startup
 engine = None
@@ -50,7 +80,11 @@ async def root():
         "endpoints": {
             "/sync": "POST - Sync bookmarks from Twitter",
             "/health": "GET - Health check",
-            "/stats": "GET - Get database statistics"
+            "/stats": "GET - Get database statistics",
+            "/bookmarks": "GET - List all bookmarks (sorted by created_at desc)",
+            "/bookmarks/{id}": "PATCH - Update bookmark (toggle read/unread, manage categories)",
+            "/categories": "GET - List all categories, POST - Create a new category",
+            "/categories/{id}": "DELETE - Mark a category as deleted"
         }
     }
 
@@ -102,6 +136,375 @@ async def get_stats(db: Session = Depends(get_db)):
         }
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to get stats: {str(e)}")
+
+
+@app.get("/bookmarks")
+async def list_bookmarks(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """
+    List all bookmarks sorted by created_at descending.
+    
+    Args:
+        skip: Number of records to skip (default: 0)
+        limit: Maximum number of records to return (default: 100, max: 1000)
+    
+    Returns:
+        List of bookmarks with metadata
+    """
+    try:
+        # Validate and cap limit
+        limit = min(limit, 1000)
+        
+        # Query bookmarks sorted by created_at descending
+        bookmarks = db.query(Tweet).filter(
+            Tweet.is_deleted == 0
+        ).order_by(
+            desc(Tweet.created_at)
+        ).offset(skip).limit(limit).all()
+        
+        # Get total count for pagination info
+        total_count = db.query(Tweet).filter(Tweet.is_deleted == 0).count()
+        
+        # Format response
+        result = {
+            "total": total_count,
+            "skip": skip,
+            "limit": limit,
+            "count": len(bookmarks),
+            "bookmarks": [
+                {
+                    "id": bookmark.id,
+                    "tweet_id": bookmark.tweet_id,
+                    "text": bookmark.text,
+                    "author_id": bookmark.author_id,
+                    "author_username": bookmark.author_username,
+                    "created_at": bookmark.created_at,
+                    "bookmarked_at": bookmark.bookmarked_at,
+                    "is_read": bool(bookmark.is_read),
+                    "has_media_image": bool(bookmark.has_media_image),
+                    "has_media_video": bool(bookmark.has_media_video),
+                    "url": bookmark.url,
+                    "inserted_at": bookmark.inserted_at,
+                    "updated_at": bookmark.updated_at
+                }
+                for bookmark in bookmarks
+            ]
+        }
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list bookmarks: {str(e)}")
+
+
+@app.patch("/bookmarks/{bookmark_id}")
+async def update_bookmark(
+    bookmark_id: int,
+    update_data: BookmarkUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    Update a bookmark: toggle read/unread status and manage category assignments.
+    
+    Args:
+        bookmark_id: ID of the bookmark to update
+        update_data: Update data (is_read, add_categories, remove_categories)
+    
+    Returns:
+        Updated bookmark with current categories
+    """
+    try:
+        # Find bookmark
+        bookmark = db.query(Tweet).filter(
+            Tweet.id == bookmark_id,
+            Tweet.is_deleted == 0
+        ).first()
+        
+        if not bookmark:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Bookmark with id {bookmark_id} not found"
+            )
+        
+        current_time = datetime.now().isoformat()
+        updated_fields = []
+        
+        # Update read status if provided
+        if update_data.is_read is not None:
+            bookmark.is_read = 1 if update_data.is_read else 0
+            bookmark.updated_at = current_time
+            updated_fields.append(f"is_read={'true' if update_data.is_read else 'false'}")
+        
+        # Add categories
+        added_categories = []
+        if update_data.add_categories:
+            for category_id in update_data.add_categories:
+                # Verify category exists and is not deleted
+                category = db.query(Category).filter(
+                    Category.id == category_id,
+                    Category.is_deleted == 0
+                ).first()
+                
+                if not category:
+                    raise HTTPException(
+                        status_code=404,
+                        detail=f"Category with id {category_id} not found"
+                    )
+                
+                # Check if assignment already exists
+                existing = db.query(TweetCategory).filter(
+                    TweetCategory.tweet_id == bookmark_id,
+                    TweetCategory.category_id == category_id
+                ).first()
+                
+                if not existing:
+                    tweet_category = TweetCategory(
+                        tweet_id=bookmark_id,
+                        category_id=category_id,
+                        added_at=current_time
+                    )
+                    db.add(tweet_category)
+                    added_categories.append(category.name)
+                    updated_fields.append(f"added category '{category.name}'")
+        
+        # Remove categories
+        removed_categories = []
+        if update_data.remove_categories:
+            for category_id in update_data.remove_categories:
+                # Find and delete the assignment
+                assignment = db.query(TweetCategory).filter(
+                    TweetCategory.tweet_id == bookmark_id,
+                    TweetCategory.category_id == category_id
+                ).first()
+                
+                if assignment:
+                    category = db.query(Category).filter(Category.id == category_id).first()
+                    db.delete(assignment)
+                    removed_categories.append(category.name if category else str(category_id))
+                    updated_fields.append(f"removed category '{category.name if category else category_id}'")
+        
+        # Commit all changes
+        db.commit()
+        db.refresh(bookmark)
+        
+        # Get current categories for this bookmark
+        current_category_ids = db.query(TweetCategory.category_id).filter(
+            TweetCategory.tweet_id == bookmark_id
+        ).all()
+        
+        current_categories = []
+        if current_category_ids:
+            categories = db.query(Category).filter(
+                Category.id.in_([c[0] for c in current_category_ids]),
+                Category.is_deleted == 0
+            ).all()
+            current_categories = [
+                {
+                    "id": cat.id,
+                    "name": cat.name,
+                    "description": cat.description
+                }
+                for cat in categories
+            ]
+        
+        return {
+            "status": "success",
+            "message": f"Bookmark updated: {', '.join(updated_fields)}" if updated_fields else "No changes made",
+            "bookmark": {
+                "id": bookmark.id,
+                "tweet_id": bookmark.tweet_id,
+                "text": bookmark.text,
+                "author_username": bookmark.author_username,
+                "is_read": bool(bookmark.is_read),
+                "url": bookmark.url,
+                "updated_at": bookmark.updated_at,
+                "categories": current_categories
+            },
+            "changes": {
+                "read_status_changed": update_data.is_read is not None,
+                "categories_added": added_categories,
+                "categories_removed": removed_categories
+            }
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to update bookmark: {str(e)}")
+
+
+@app.post("/categories", response_model=CategoryResponse, status_code=201)
+async def create_category(
+    category: CategoryCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    Create a new category.
+    
+    Args:
+        category: Category data with name and optional description
+    
+    Returns:
+        Created category with metadata
+    """
+    try:
+        # Validate name length
+        if len(category.name.strip()) == 0:
+            raise HTTPException(status_code=400, detail="Category name cannot be empty")
+        
+        if len(category.name) > 120:
+            raise HTTPException(status_code=400, detail="Category name cannot exceed 120 characters")
+        
+        # Check if category with same name already exists (excluding deleted)
+        existing_category = db.query(Category).filter(
+            Category.name == category.name.strip(),
+            Category.is_deleted == 0
+        ).first()
+        
+        if existing_category:
+            raise HTTPException(
+                status_code=409, 
+                detail=f"Category with name '{category.name}' already exists"
+            )
+        
+        # Create new category
+        current_time = datetime.now().isoformat()
+        new_category = Category(
+            name=category.name.strip(),
+            description=category.description.strip() if category.description else None,
+            created_at=current_time,
+            updated_at=current_time,
+            is_deleted=0
+        )
+        
+        db.add(new_category)
+        db.commit()
+        db.refresh(new_category)
+        
+        # Return response
+        return CategoryResponse(
+            id=new_category.id,
+            name=new_category.name,
+            description=new_category.description,
+            created_at=new_category.created_at,
+            updated_at=new_category.updated_at,
+            is_deleted=bool(new_category.is_deleted)
+        )
+    
+    except HTTPException:
+        raise
+    except IntegrityError as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail=f"Category with name '{category.name}' already exists"
+        )
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to create category: {str(e)}")
+
+
+@app.get("/categories")
+async def list_categories(
+    include_deleted: bool = False,
+    db: Session = Depends(get_db)
+):
+    """
+    List all categories.
+    
+    Args:
+        include_deleted: Include deleted categories (default: False)
+    
+    Returns:
+        List of categories with metadata
+    """
+    try:
+        # Build query
+        query = db.query(Category)
+        
+        if not include_deleted:
+            query = query.filter(Category.is_deleted == 0)
+        
+        # Order by name
+        categories = query.order_by(Category.name).all()
+        
+        # Format response
+        result = {
+            "total": len(categories),
+            "categories": [
+                {
+                    "id": cat.id,
+                    "name": cat.name,
+                    "description": cat.description,
+                    "created_at": cat.created_at,
+                    "updated_at": cat.updated_at,
+                    "is_deleted": bool(cat.is_deleted)
+                }
+                for cat in categories
+            ]
+        }
+        
+        return result
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to list categories: {str(e)}")
+
+
+@app.delete("/categories/{category_id}", status_code=200)
+async def delete_category(
+    category_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    Mark a category as deleted (soft delete).
+    
+    Args:
+        category_id: ID of the category to delete
+    
+    Returns:
+        Success message with deleted category info
+    """
+    try:
+        # Find category
+        category = db.query(Category).filter(Category.id == category_id).first()
+        
+        if not category:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Category with id {category_id} not found"
+            )
+        
+        # Check if already deleted
+        if category.is_deleted == 1:
+            raise HTTPException(
+                status_code=410,
+                detail=f"Category '{category.name}' is already deleted"
+            )
+        
+        # Soft delete
+        category.is_deleted = 1
+        category.updated_at = datetime.now().isoformat()
+        db.commit()
+        
+        return {
+            "status": "success",
+            "message": f"Category '{category.name}' marked as deleted",
+            "category": {
+                "id": category.id,
+                "name": category.name,
+                "description": category.description,
+                "is_deleted": True,
+                "deleted_at": category.updated_at
+            }
+        }
+    
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=f"Failed to delete category: {str(e)}")
 
 
 @app.post("/sync")
