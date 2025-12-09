@@ -4,23 +4,25 @@ A FastAPI-based web server to sync and manage your Twitter/X bookmarks locally u
 
 ## Features
 
-- 📥 Sync Twitter bookmarks via the GraphQL API
-- 💾 Store bookmarks in a local SQLite database
-- 🔄 Pagination support to fetch all bookmarks
-- 📊 Track sync state and statistics
-- 🎯 Metadata extraction (media, authors, timestamps)
-- 🔍 Raw JSON storage for future-proofing
+- 📥 **Sync Twitter bookmarks** via the GraphQL API
+- 💾 **Store bookmarks** in a local SQLite database
+- 🔄 **Pagination support** to fetch all bookmarks
+- 📊 **Track sync state** and statistics
+- 🎯 **Metadata extraction** (media, authors, timestamps)
+- 🏷️ **Categorize bookmarks** with custom categories
+- ✅ **Mark as read/unread** functionality
+- 🔍 **Raw JSON storage** for future-proofing
 
 ## Project Structure
 
 ```
-twitter-bookmarks/
+twitter_bookmark_manager/
 ├── app/
 │   ├── __init__.py
-│   ├── main.py           # FastAPI application and /sync endpoint
-│   ├── models.py         # SQLAlchemy models (tweets, sync_state)
+│   ├── main.py           # FastAPI application and API endpoints
+│   ├── models.py         # SQLAlchemy models (tweets, categories, sync_state)
 │   ├── config.py         # Configuration management
-│   └── twitter_client.py # Twitter API client
+│   └── twitter_client.py # Twitter GraphQL API client
 ├── requirements.txt
 ├── .env.example
 ├── .gitignore
@@ -31,64 +33,64 @@ twitter-bookmarks/
 
 ### Table: `tweets`
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | INTEGER PRIMARY KEY | Internal surrogate key |
-| `tweet_id` | TEXT UNIQUE NOT NULL | Twitter's snowflake ID |
-| `text` | TEXT NOT NULL | Tweet body |
-| `author_id` | TEXT | Author's user ID |
-| `author_username` | TEXT | Username for display |
-| `created_at` | TEXT NOT NULL | Tweet creation timestamp (ISO 8601) |
-| `bookmarked_at` | TEXT NOT NULL | When you bookmarked it |
-| `is_read` | INTEGER DEFAULT 0 | 0 = unread, 1 = read |
-| `has_media_image` | INTEGER DEFAULT 0 | Flag if images present |
-| `has_media_video` | INTEGER DEFAULT 0 | Flag if videos/GIFs present |
-| `url` | TEXT | Canonical tweet URL |
-| `source_json` | TEXT | Raw API payload |
-| `is_deleted` | INTEGER DEFAULT 0 | Soft delete flag |
-| `inserted_at` | TEXT NOT NULL | Local insertion timestamp |
-| `updated_at` | TEXT NOT NULL | Last local update timestamp |
-| `sync_state_id` | INTEGER FOREIGN KEY | References id from sync_state |
+| Column            | Type                | Description                           |
+|-------------------|---------------------|---------------------------------------|
+| `id`              | INTEGER PRIMARY KEY | Internal surrogate key                |
+| `tweet_id`        | TEXT UNIQUE NOT NULL| Twitter's snowflake ID                |
+| `text`            | TEXT NOT NULL       | Tweet body                            |
+| `author_id`       | TEXT                | Author's user ID                      |
+| `author_username` | TEXT                | Username for display                  |
+| `created_at`      | TEXT NOT NULL       | Tweet creation timestamp (ISO 8601)   |
+| `bookmarked_at`   | TEXT NOT NULL       | When you bookmarked it                |
+| `is_read`         | INTEGER DEFAULT 0   | 0 = unread, 1 = read                  |
+| `has_media_image` | INTEGER DEFAULT 0   | Flag if images present                |
+| `has_media_video` | INTEGER DEFAULT 0   | Flag if videos/GIFs present           |
+| `url`             | TEXT                | Canonical tweet URL                   |
+| `source_json`     | TEXT                | Raw API payload                       |
+| `is_deleted`      | INTEGER DEFAULT 0   | Soft delete flag                      |
+| `inserted_at`     | TEXT NOT NULL       | Local insertion timestamp             |
+| `updated_at`      | TEXT NOT NULL       | Last local update timestamp           |
+| `sync_state_id`   | INTEGER FOREIGN KEY | References `sync_state.id`            |
 
 ### Table: `sync_state`
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | INTEGER PRIMARY KEY | Incremental PRIMARY KEY |
-| `last_sync_started_at` | TEXT | When last sync started |
-| `last_sync_completed_at` | TEXT | When last sync completed |
-| `last_seen_marker` | TEXT | For delta fetches |
-| `last_error` | TEXT | Last error message |
-| `page_cursor` | TEXT | Pagination cursor |
-| `bookmarks_added` | INTEGER | No of bookmakrs added in the sync |
-| `bookmarks_updated` | INTEGER | No of bookmakrs updated in the sync |
+| Column                    | Type                | Description                          |
+|---------------------------|---------------------|--------------------------------------|
+| `id`                      | INTEGER PRIMARY KEY | Incremental PRIMARY KEY              |
+| `last_sync_started_at`    | TEXT                | When last sync started               |
+| `last_sync_completed_at`  | TEXT                | When last sync completed             |
+| `last_seen_marker`        | TEXT                | For delta fetches                    |
+| `last_error`              | TEXT                | Last error message                   |
+| `page_cursor`             | TEXT                | Pagination cursor                    |
+| `bookmarks_added`         | INTEGER             | Number of bookmarks added in sync    |
+| `bookmarks_updated`       | INTEGER             | Number of bookmarks updated in sync  |
 
 ### Table: `categories`
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `id` | INTEGER PRIMARY KEY | Category key (auto increment) |
-| `name` | TEXT UNIQUE NOT NULL | Display name (max 120 chars) |
-| `description` | TEXT | Optional notes |
-| `created_at` | TEXT NOT NULL | Creation timestamp (ISO 8601) |
-| `updated_at` | TEXT NOT NULL | Last update timestamp (ISO 8601) |
-| `is_deleted` | INTEGER DEFAULT 0 | Soft delete flag |
+| Column        | Type                  | Description                          |
+|---------------|-----------------------|--------------------------------------|
+| `id`          | INTEGER PRIMARY KEY   | Category key (auto increment)        |
+| `name`        | TEXT UNIQUE NOT NULL  | Display name (max 120 chars)         |
+| `description` | TEXT                  | Optional notes                       |
+| `created_at`  | TEXT NOT NULL         | Creation timestamp (ISO 8601)        |
+| `updated_at`  | TEXT NOT NULL         | Last update timestamp (ISO 8601)     |
+| `is_deleted`  | INTEGER DEFAULT 0     | Soft delete flag                     |
 
 ### Table: `tweet_categories`
 
-| Column | Type | Description |
-|--------|------|-------------|
-| `tweet_id` | INTEGER NOT NULL | FK to tweets.id |
-| `category_id` | INTEGER NOT NULL | FK to categories.id |
-| `added_at` | TEXT NOT NULL | Assignment timestamp (ISO 8601) |
-| **PRIMARY KEY** | | `(tweet_id, category_id)` |
+| Column          | Type              | Description                        |
+|-----------------|-------------------|------------------------------------|
+| `tweet_id`      | INTEGER NOT NULL  | FK to `tweets.id`                  |
+| `category_id`   | INTEGER NOT NULL  | FK to `categories.id`              |
+| `added_at`      | TEXT NOT NULL     | Assignment timestamp (ISO 8601)    |
+| **PRIMARY KEY** |                   | `(tweet_id, category_id)`          |
 
 ## Setup Instructions
 
 ### 1. Prerequisites
 
-- Python 3.8+
-- Twitter/X account with bookmarks
+- **Python 3.8+**
+- **Twitter/X account** with bookmarks
 
 ### 2. Installation
 
@@ -113,16 +115,16 @@ pip install -r requirements.txt
 
 You need to extract authentication credentials from your browser:
 
-1. Open Twitter/X in your browser and log in
-2. Open Browser Developer Tools (F12 or right-click → Inspect)
-3. Go to the **Network** tab
-4. Navigate to your Bookmarks: https://x.com/i/bookmarks
-5. Filter network requests by "Bookmarks"
+1. **Open Twitter/X** in your browser and log in
+2. **Open Developer Tools** (F12 or right-click → Inspect)
+3. Navigate to the **Network** tab
+4. Go to your Bookmarks: `https://x.com/i/bookmarks`
+5. Filter network requests by **"Bookmarks"**
 6. Click on a Bookmarks API request
-7. In the **Headers** tab, copy:
-   - **Authorization** header (Bearer token)
-   - **x-csrf-token** header (CSRF token)
-   - **Cookie** header (all cookies as one string)
+7. In the **Headers** tab, copy these three values:
+   - `Authorization` header (Bearer token)
+   - `x-csrf-token` header (CSRF token)
+   - `Cookie` header (all cookies as one string)
 
 ### 4. Configure Environment
 
@@ -153,21 +155,26 @@ The server will start at: http://localhost:8000
 
 ## API Endpoints
 
-### `GET /`
+### Core Endpoints
+
+#### `GET /`
+
 Root endpoint with API information.
 
 ```bash
 curl http://localhost:8000/
 ```
 
-### `GET /health`
+#### `GET /health`
+
 Health check and database status.
 
 ```bash
 curl http://localhost:8000/health
 ```
 
-### `GET /stats`
+#### `GET /stats`
+
 Get statistics about stored bookmarks.
 
 ```bash
@@ -188,7 +195,12 @@ Response:
 }
 ```
 
-### `GET /bookmarks`
+---
+
+### Bookmark Endpoints
+
+#### `GET /bookmarks`
+
 List all bookmarks sorted by `created_at` descending.
 
 **Parameters:**
@@ -236,7 +248,8 @@ Response:
 }
 ```
 
-### `PATCH /bookmarks/{bookmark_id}`
+#### `PATCH /bookmarks/{bookmark_id}`
+
 Update a bookmark: toggle read/unread status and manage category assignments.
 
 **Parameters:**
@@ -325,10 +338,15 @@ Response (200 OK):
 ```
 
 **Error responses:**
-- `404 Not Found`: Bookmark or category with specified ID does not exist
-- `400 Bad Request`: Invalid request data
+- `404 Not Found` - Bookmark or category with specified ID does not exist
+- `400 Bad Request` - Invalid request data
 
-### `POST /categories`
+---
+
+### Category Endpoints
+
+#### `POST /categories`
+
 Create a new category for organizing bookmarks.
 
 **Request body:**
@@ -366,10 +384,11 @@ Response (201 Created):
 ```
 
 **Error responses:**
-- `400 Bad Request`: Empty name or name exceeds 120 characters
-- `409 Conflict`: Category with the same name already exists
+- `400 Bad Request` - Empty name or name exceeds 120 characters
+- `409 Conflict` - Category with the same name already exists
 
-### `GET /categories`
+#### `GET /categories`
+
 List all categories.
 
 **Parameters:**
@@ -410,7 +429,8 @@ Response:
 }
 ```
 
-### `DELETE /categories/{category_id}`
+#### `DELETE /categories/{category_id}`
+
 Mark a category as deleted (soft delete).
 
 **Parameters:**
@@ -437,10 +457,15 @@ Response (200 OK):
 ```
 
 **Error responses:**
-- `404 Not Found`: Category with specified ID does not exist
-- `410 Gone`: Category is already deleted
+- `404 Not Found` - Category with specified ID does not exist
+- `410 Gone` - Category is already deleted
 
-### `POST /sync`
+---
+
+### Sync Endpoint
+
+#### `POST /sync`
+
 Sync bookmarks from Twitter API.
 
 **Basic sync (fetch all):**
@@ -518,25 +543,30 @@ pytest
 
 ## Troubleshooting
 
-### "Authentication failed" errors
-- Your tokens may have expired - extract fresh credentials from your browser
-- Ensure all three credentials (bearer token, CSRF token, cookies) are correctly copied
+### Authentication Failed Errors
 
-### "No bookmarks found"
-- Check that you have bookmarks in your Twitter account
-- Verify the GraphQL query ID is still valid (Twitter may change it)
+- **Tokens expired** - Extract fresh credentials from your browser
+- **Missing credentials** - Ensure all three values (Bearer token, CSRF token, Cookies) are correctly copied
 
-### Database locked errors
-- Only one process should write to the database at a time
-- Stop any other running instances
+### No Bookmarks Found
+
+- **Empty bookmarks** - Verify you have bookmarks in your Twitter account
+- **Invalid query ID** - The GraphQL query ID may have changed (Twitter updates these periodically)
+
+### Database Locked Errors
+
+- **Multiple processes** - Only one process should write to the database at a time
+- **Solution** - Stop any other running instances of the application
 
 ## Security Notes
 
-⚠️ **Important**: 
-- **Never commit** your `.env` file with real credentials
+⚠️ **Important Security Considerations:**
+
+- **Never commit** your `.env` file with real credentials to version control
 - The `.gitignore` file excludes `.env` by default
-- Keep your authentication tokens secure
-- Tokens expire periodically - you'll need to refresh them
+- **Keep authentication tokens secure** - treat them like passwords
+- **Tokens expire periodically** - you'll need to refresh them from your browser
+- **For personal use only** - respect Twitter's Terms of Service
 
 ## License
 
@@ -544,14 +574,17 @@ This project is for personal use. Respect Twitter's Terms of Service.
 
 ## Future Enhancements
 
-Potential improvements:
-- [ ] Full-text search on tweets
-- [ ] Export to JSON/CSV
-- [ ] Web UI for browsing bookmarks
-- [ ] Automatic token refresh
-- [ ] Mark tweets as read via API
-- [ ] Tag/categorize bookmarks
-- [ ] Search and filter endpoints
+Potential improvements and features under consideration:
+
+- [ ] **Full-text search** - Search tweets by content
+- [ ] **Export functionality** - Export to JSON/CSV formats
+- [ ] **Web UI** - Browse and manage bookmarks via web interface
+- [ ] **Automatic token refresh** - Auto-refresh expired tokens
+- [ ] **Advanced filtering** - Filter by author, date range, media type
+- [ ] **Bulk operations** - Batch mark as read, bulk categorization
+- [ ] **Search endpoints** - Advanced search and filter API endpoints
+- [ ] **Analytics** - Reading patterns and bookmark statistics
+- [ ] **Backup/restore** - Database backup and restore functionality
 
 ## Contributing
 
