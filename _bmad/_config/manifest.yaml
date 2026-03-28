@@ -1,0 +1,22 @@
+installation:
+  version: 6.0.0-Beta.8
+  installDate: 2026-02-14T11:03:26.437Z
+  lastUpdated: 2026-02-14T11:03:26.437Z
+modules:
+  - name: core
+    version: 6.0.0-Beta.8
+    installDate: 2026-02-14T11:03:25.870Z
+    lastUpdated: 2026-02-14T11:03:25.870Z
+    source: built-in
+    npmPackage: null
+    repoUrl: null
+  - name: cis
+    version: 0.1.6
+    installDate: 2026-02-14T11:03:25.850Z
+    lastUpdated: 2026-02-14T11:03:26.437Z
+    source: external
+    npmPackage: bmad-creative-intelligence-suite
+    repoUrl: https://github.com/bmad-code-org/bmad-module-creative-intelligence-suite
+ides:
+  - gemini
+  - github-copilot
