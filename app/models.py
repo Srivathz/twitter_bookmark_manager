@@ -43,7 +43,7 @@ class Tweet(Base):
 class SyncState(Base):
     """
     Table: sync_state
-    Singleton table to track synchronization state.
+    Table to track synchronization state.
     """
 
     __tablename__ = "sync_state"
@@ -56,8 +56,6 @@ class SyncState(Base):
     page_cursor = Column(Text)
     bookmarks_added = Column(Integer)
     bookmarks_updated = Column(Integer)
-
-    __table_args__ = (CheckConstraint("id = 1", name="singleton_check"),)
 
 
 class Category(Base):
@@ -105,18 +103,6 @@ def get_engine(database_url: str):
 def init_db(engine):
     """Initialize database tables."""
     Base.metadata.create_all(engine)
-
-    # Ensure sync_state has a singleton row
-    SessionLocal = sessionmaker(bind=engine)
-    session = SessionLocal()
-    try:
-        sync_state = session.query(SyncState).filter_by(id=1).first()
-        if not sync_state:
-            sync_state = SyncState(id=1)
-            session.add(sync_state)
-            session.commit()
-    finally:
-        session.close()
 
 
 def get_session(engine):

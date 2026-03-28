@@ -6,8 +6,9 @@ from typing import List, Optional
 
 import traceback
 from fastapi import Depends, FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
-from sqlalchemy import desc
+from sqlalchemy import desc, or_
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -32,6 +33,15 @@ app = FastAPI(
     title="Twitter Bookmarks Manager",
     description="FastAPI service to sync Twitter bookmarks to local SQLite database",
     version="1.0.0",
+)
+
+# CORS Configuration
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:5173"],  # Frontend dev server
+    allow_credentials=True,
+    allow_methods=["*"],  # Allow all HTTP methods
+    allow_headers=["*"],  # Allow all headers
 )
 
 engine = None
@@ -332,7 +342,7 @@ async def root():
             "/sync": "POST - Sync bookmarks from Twitter",
             "/health": "GET - Health check",
             "/stats": "GET - Get database statistics",
-            "/bookmarks": "GET - List all bookmarks (sorted by created_at desc)",
+            "/bookmarks": "GET - List bookmarks with filtering (is_read, category_id, search) and pagination",
             "/bookmarks/{id}": "PATCH - Update bookmark (toggle read/unread, manage categories)",
             "/categories": "GET - List all categories, POST - Create a new category",
             "/categories/{id}": "DELETE - Mark a category as deleted",
@@ -408,14 +418,20 @@ async def get_stats(db: Session = Depends(get_db)):
 async def list_bookmarks(
     skip: int = 0,
     limit: int = 100,
+    is_read: Optional[bool] = None,
+    category_id: Optional[int] = None,
+    search: Optional[str] = None,
     db: Session = Depends(get_db),
 ):
     """
-    List all bookmarks sorted by created_at descending.
+    List bookmarks with optional filtering, sorted by created_at descending.
 
     Args:
         skip: Number of records to skip (default: 0)
         limit: Maximum number of records to return (default: 100, max: 1000)
+        is_read: Filter by read status (true/false, optional)
+        category_id: Filter by category ID (optional)
+        search: Search in text and author username (optional)
 
     Returns:
         List of bookmarks with metadata
@@ -424,18 +440,39 @@ async def list_bookmarks(
         # Validate and cap limit
         limit = min(limit, 1000)
 
-        # Query bookmarks sorted by created_at descending
+        # Build base query
+        query = db.query(Tweet).filter(Tweet.is_deleted == 0)
+
+        # Apply is_read filter if provided
+        if is_read is not None:
+            query = query.filter(Tweet.is_read == (1 if is_read else 0))
+
+        # Apply category filter if provided
+        if category_id is not None:
+            query = query.join(TweetCategory).filter(
+                TweetCategory.category_id == category_id
+            )
+
+        # Apply search filter if provided
+        if search:
+            search_pattern = f"%{search}%"
+            query = query.filter(
+                or_(
+                    Tweet.text.ilike(search_pattern),
+                    Tweet.author_username.ilike(search_pattern)
+                )
+            )
+
+        # Get total count with filters applied
+        total_count = query.count()
+
+        # Apply sorting, pagination and fetch bookmarks
         bookmarks = (
-            db.query(Tweet)
-            .filter(Tweet.is_deleted == 0)
-            .order_by(desc(Tweet.created_at))
+            query.order_by(desc(Tweet.created_at))
             .offset(skip)
             .limit(limit)
             .all()
         )
-
-        # Get total count for pagination info
-        total_count = db.query(Tweet).filter(Tweet.is_deleted == 0).count()
 
         return {
             "total": total_count,
