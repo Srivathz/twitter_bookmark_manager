@@ -64,7 +64,7 @@ const BookmarkDetailModal: React.FC<BookmarkDetailModalProps> = ({ bookmark, ope
             <div className="flex items-center gap-3">
               <span className="text-sm text-gray-500 dark:text-gray-400">{new Date(bookmark.created_at).toLocaleString()}</span>
               <a 
-                href={`${bookmark.url}`} 
+                href={`https://twitter.com/i/web/status/${bookmark.id}`} 
                 target="_blank" 
                 rel="noopener noreferrer" 
                 className="text-blue-500 dark:text-blue-400 text-sm hover:underline flex items-center gap-1"
